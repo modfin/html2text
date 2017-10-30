@@ -16,6 +16,8 @@ import (
 // Options provide toggles and overrides to control specific rendering behaviors.
 type Options struct {
 	PrettyTables bool // Turns on pretty ASCII rendering for table elements.
+	BreakLongLines bool
+	BreakLongLinesAt int
 }
 
 // FromHTMLNode renders text output from a pre-parsed HTML document.
@@ -86,6 +88,7 @@ type tableTraverseContext struct {
 	header     []string
 	body       [][]string
 	footer     []string
+	alignment  []int
 	tmpRow     int
 	isInFooter bool
 }
@@ -94,6 +97,7 @@ func (tableCtx *tableTraverseContext) init() {
 	tableCtx.body = [][]string{}
 	tableCtx.header = []string{}
 	tableCtx.footer = []string{}
+	tableCtx.alignment = []int{}
 	tableCtx.isInFooter = false
 	tableCtx.tmpRow = 0
 }
@@ -132,24 +136,37 @@ func (ctx *textifyTraverseContext) handleElement(node *html.Node) error {
 
 	case atom.Blockquote:
 		ctx.blockquoteLevel++
-		ctx.prefix = strings.Repeat(">", ctx.blockquoteLevel) + " "
-		if err := ctx.emit("\n"); err != nil {
-			return err
-		}
-		if ctx.blockquoteLevel == 1 {
-			if err := ctx.emit("\n"); err != nil {
-				return err
-			}
-		}
+		ctx.prefix = strings.Repeat("> ", ctx.blockquoteLevel) + " "
+
 		if err := ctx.traverseChildren(node); err != nil {
 			return err
 		}
+
 		ctx.blockquoteLevel--
-		ctx.prefix = strings.Repeat(">", ctx.blockquoteLevel)
+		ctx.prefix = strings.Repeat("> ", ctx.blockquoteLevel)
 		if ctx.blockquoteLevel > 0 {
 			ctx.prefix += " "
 		}
-		return ctx.emit("\n\n")
+		return nil
+		//ctx.blockquoteLevel++
+		//ctx.prefix = strings.Repeat(">", ctx.blockquoteLevel) + " "
+		//if err := ctx.emit("\n"); err != nil {
+		//	return err
+		//}
+		//if ctx.blockquoteLevel == 1 {
+		//	if err := ctx.emit("\n"); err != nil {
+		//		return err
+		//	}
+		//}
+		//if err := ctx.traverseChildren(node); err != nil {
+		//	return err
+		//}
+		//ctx.blockquoteLevel--
+		//ctx.prefix = strings.Repeat(">", ctx.blockquoteLevel)
+		//if ctx.blockquoteLevel > 0 {
+		//	ctx.prefix += " "
+		//}
+		//return ctx.emit("\n\n")
 
 	case atom.Div:
 		if ctx.lineLength > 0 {
@@ -238,6 +255,7 @@ func (ctx *textifyTraverseContext) handleElement(node *html.Node) error {
 
 // paragraphHandler renders node children surrounded by double newlines.
 func (ctx *textifyTraverseContext) paragraphHandler(node *html.Node) error {
+
 	if err := ctx.emit("\n\n"); err != nil {
 		return err
 	}
@@ -270,6 +288,8 @@ func (ctx *textifyTraverseContext) handleTableElement(node *html.Node) error {
 		buf := &bytes.Buffer{}
 		table := tablewriter.NewWriter(buf)
 		table.SetHeader(ctx.tableCtx.header)
+		table.SetAutoFormatHeaders(false)
+		table.SetColumnAlignment(ctx.tableCtx.alignment)
 		table.SetFooter(ctx.tableCtx.footer)
 		table.AppendBulk(ctx.tableCtx.body)
 
@@ -296,6 +316,13 @@ func (ctx *textifyTraverseContext) handleTableElement(node *html.Node) error {
 		ctx.tableCtx.tmpRow++
 
 	case atom.Th:
+		align := tablewriter.ALIGN_DEFAULT
+		switch getAttrVal(node, "align") {
+		case "right": align = tablewriter.ALIGN_RIGHT
+		case "center": align = tablewriter.ALIGN_CENTER
+		case "left": align = tablewriter.ALIGN_RIGHT
+		}
+		ctx.tableCtx.alignment = append(ctx.tableCtx.alignment, align)
 		res, err := ctx.renderEachChild(node)
 		if err != nil {
 			return err
@@ -379,11 +406,10 @@ func (ctx *textifyTraverseContext) emit(data string) error {
 	return nil
 }
 
-const maxLineLen = 74
-
+//const maxLineLen = 74
 func (ctx *textifyTraverseContext) breakLongLines(data string) []string {
-	// Only break lines when in blockquotes.
-	if ctx.blockquoteLevel == 0 {
+
+	if ctx.blockquoteLevel == 0 || !ctx.options.BreakLongLines{
 		return []string{data}
 	}
 	var (
@@ -392,18 +418,18 @@ func (ctx *textifyTraverseContext) breakLongLines(data string) []string {
 		l        = len(runes)
 		existing = ctx.lineLength
 	)
-	if existing >= maxLineLen {
+	if existing >= ctx.options.BreakLongLinesAt {
 		ret = append(ret, "\n")
 		existing = 0
 	}
-	for l+existing > maxLineLen {
-		i := maxLineLen - existing
+	for l+existing > ctx.options.BreakLongLinesAt {
+		i := ctx.options.BreakLongLinesAt - existing
 		for i >= 0 && !unicode.IsSpace(runes[i]) {
 			i--
 		}
 		if i == -1 {
 			// No spaces, so go the other way.
-			i = maxLineLen - existing
+			i = ctx.options.BreakLongLinesAt - existing
 			for i < l && !unicode.IsSpace(runes[i]) {
 				i++
 			}
