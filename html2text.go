@@ -38,6 +38,9 @@ func FromHTMLNode(doc *html.Node, o ...Options) (string, error) {
 	text := strings.TrimSpace(newlineRe.ReplaceAllString(
 		strings.Replace(ctx.buf.String(), "\n ", "\n", -1), "\n\n"),
 	)
+	text = strings.Replace(text, "'", "’", -1)
+
+
 	return text, nil
 }
 
@@ -79,6 +82,7 @@ type textifyTraverseContext struct {
 	options         Options
 	endsWithSpace   bool
 	justClosedDiv   bool
+	insideMfnFooter bool
 	blockquoteLevel int
 	lineLength      int
 }
@@ -135,19 +139,28 @@ func (ctx *textifyTraverseContext) handleElement(node *html.Node) error {
 		return ctx.emit("\n\n" + divider + "\n" + str + "\n" + divider + "\n\n")
 
 	case atom.Blockquote:
-		ctx.blockquoteLevel++
-		ctx.prefix = strings.Repeat("> ", ctx.blockquoteLevel) + " "
-
 		if err := ctx.traverseChildren(node); err != nil {
 			return err
 		}
-
-		ctx.blockquoteLevel--
-		ctx.prefix = strings.Repeat("> ", ctx.blockquoteLevel)
-		if ctx.blockquoteLevel > 0 {
-			ctx.prefix += " "
-		}
 		return nil
+
+
+
+		//ctx.blockquoteLevel++
+		//ctx.prefix = strings.Repeat("  ", ctx.blockquoteLevel)
+		//
+		//if err := ctx.traverseChildren(node); err != nil {
+		//	return err
+		//}
+		//
+		//ctx.blockquoteLevel--
+		//ctx.prefix = strings.Repeat("  ", ctx.blockquoteLevel)
+		//if ctx.blockquoteLevel > 0 {
+		//	ctx.prefix += " "
+		//}
+		//return nil
+
+
 		//ctx.blockquoteLevel++
 		//ctx.prefix = strings.Repeat(">", ctx.blockquoteLevel) + " "
 		//if err := ctx.emit("\n"); err != nil {
@@ -174,6 +187,15 @@ func (ctx *textifyTraverseContext) handleElement(node *html.Node) error {
 				return err
 			}
 		}
+
+		ctx.insideMfnFooter = false
+		class := getAttrVal(node, "class")
+		for _, c := range strings.Split(class, " ") {
+			if c == "mfn-footer" {
+				ctx.insideMfnFooter = true
+			}
+		}
+
 		if err := ctx.traverseChildren(node); err != nil {
 			return err
 		}
@@ -182,6 +204,7 @@ func (ctx *textifyTraverseContext) handleElement(node *html.Node) error {
 			err = ctx.emit("\n")
 		}
 		ctx.justClosedDiv = true
+		ctx.insideMfnFooter = false
 		return err
 
 	case atom.Li:
@@ -196,13 +219,14 @@ func (ctx *textifyTraverseContext) handleElement(node *html.Node) error {
 		return ctx.emit("\n")
 
 	case atom.B, atom.Strong:
-		subCtx := textifyTraverseContext{}
-		subCtx.endsWithSpace = true
-		if err := subCtx.traverseChildren(node); err != nil {
-			return err
-		}
-		str := subCtx.buf.String()
-		return ctx.emit("*" + str + "*")
+		//subCtx := textifyTraverseContext{}
+		//subCtx.endsWithSpace = true
+		//if err := subCtx.traverseChildren(node); err != nil {
+		//	return err
+		//}
+		//str := subCtx.buf.String()
+		//return ctx.emit("*" + str + "*")
+		return ctx.traverseChildren(node)
 
 	case atom.A:
 		linkText := ""
@@ -227,7 +251,7 @@ func (ctx *textifyTraverseContext) handleElement(node *html.Node) error {
 			attrVal = ctx.normalizeHrefLink(attrVal)
 			// Don't print link href if it matches link element content or if the link is empty.
 			if attrVal != "" && linkText != attrVal {
-				hrefLink = "( " + attrVal + " )"
+				hrefLink = "(" + attrVal + ")"
 			}
 		}
 
@@ -248,6 +272,9 @@ func (ctx *textifyTraverseContext) handleElement(node *html.Node) error {
 		// Ignore the subtree.
 		return nil
 
+	case atom.Hr:
+		return ctx.emit(strings.Repeat("-", 78))
+
 	default:
 		return ctx.traverseChildren(node)
 	}
@@ -256,13 +283,19 @@ func (ctx *textifyTraverseContext) handleElement(node *html.Node) error {
 // paragraphHandler renders node children surrounded by double newlines.
 func (ctx *textifyTraverseContext) paragraphHandler(node *html.Node) error {
 
-	if err := ctx.emit("\n\n"); err != nil {
+	pBreak := "\n\n"
+	if ctx.insideMfnFooter {
+		pBreak = "\n"
+	}
+
+
+	if err := ctx.emit(pBreak); err != nil {
 		return err
 	}
 	if err := ctx.traverseChildren(node); err != nil {
 		return err
 	}
-	return ctx.emit("\n\n")
+	return ctx.emit(pBreak)
 }
 
 // handleTableElement is only to be invoked when options.PrettyTables is active.
@@ -287,11 +320,13 @@ func (ctx *textifyTraverseContext) handleTableElement(node *html.Node) error {
 
 		buf := &bytes.Buffer{}
 		table := tablewriter.NewWriter(buf)
+		table.SetBorders(tablewriter.Border{true, true, false, false})
 		table.SetHeader(ctx.tableCtx.header)
 		table.SetAutoFormatHeaders(false)
 		table.SetColumnAlignment(ctx.tableCtx.alignment)
 		table.SetFooter(ctx.tableCtx.footer)
 		table.AppendBulk(ctx.tableCtx.body)
+
 
 		// Render the table using ASCII.
 		table.Render()
@@ -316,13 +351,15 @@ func (ctx *textifyTraverseContext) handleTableElement(node *html.Node) error {
 		ctx.tableCtx.tmpRow++
 
 	case atom.Th:
-		align := tablewriter.ALIGN_DEFAULT
-		switch getAttrVal(node, "align") {
-		case "right": align = tablewriter.ALIGN_RIGHT
-		case "center": align = tablewriter.ALIGN_CENTER
-		case "left": align = tablewriter.ALIGN_RIGHT
+		if ctx.tableCtx.tmpRow == 0 {
+			align := tablewriter.ALIGN_LEFT
+			switch getAttrVal(node, "align") {
+			case "right": align = tablewriter.ALIGN_RIGHT
+			case "center": align = tablewriter.ALIGN_CENTER
+			}
+			ctx.tableCtx.alignment = append(ctx.tableCtx.alignment, align)
 		}
-		ctx.tableCtx.alignment = append(ctx.tableCtx.alignment, align)
+
 		res, err := ctx.renderEachChild(node)
 		if err != nil {
 			return err
@@ -331,6 +368,15 @@ func (ctx *textifyTraverseContext) handleTableElement(node *html.Node) error {
 		ctx.tableCtx.header = append(ctx.tableCtx.header, res)
 
 	case atom.Td:
+		if ctx.tableCtx.tmpRow == 0 {
+			align := tablewriter.ALIGN_LEFT
+			switch getAttrVal(node, "align") {
+			case "right": align = tablewriter.ALIGN_RIGHT
+			case "center": align = tablewriter.ALIGN_CENTER
+			}
+			ctx.tableCtx.alignment = append(ctx.tableCtx.alignment, align)
+		}
+
 		res, err := ctx.renderEachChild(node)
 		if err != nil {
 			return err
