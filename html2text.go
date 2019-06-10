@@ -38,8 +38,12 @@ func FromHTMLNode(doc *html.Node, o ...Options) (string, error) {
 	text := strings.TrimSpace(newlineRe.ReplaceAllString(
 		strings.Replace(ctx.buf.String(), "\n ", "\n", -1), "\n\n"),
 	)
-	text = strings.Replace(text, "'", "’", -1)
 
+	// disallow some typographic quotes
+	text = strings.Replace(text, "’","'", -1)
+	text = strings.Replace(text, "‘","'", -1)
+	text = strings.Replace(text, "“",`"`, -1)
+	text = strings.Replace(text, "”",`"`, -1)
 
 	return text, nil
 }
