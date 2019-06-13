@@ -39,11 +39,10 @@ func FromHTMLNode(doc *html.Node, o ...Options) (string, error) {
 		strings.Replace(ctx.buf.String(), "\n ", "\n", -1), "\n\n"),
 	)
 
+
+
 	// disallow some typographic quotes
-	text = strings.Replace(text, "’","'", -1)
-	text = strings.Replace(text, "‘","'", -1)
-	text = strings.Replace(text, "“",`"`, -1)
-	text = strings.Replace(text, "”",`"`, -1)
+	text = typographicReplacer.Replace(text)
 
 	return text, nil
 }
@@ -75,6 +74,17 @@ func FromString(input string, options ...Options) (string, error) {
 var (
 	spacingRe = regexp.MustCompile(`[ \r\n\t]+`)
 	newlineRe = regexp.MustCompile(`\n\n+`)
+	typographicReplacer = strings.NewReplacer(
+		"’","'",
+		"‘","'",
+		"“",`"`,
+		"”",`"`,
+		"\u2012", "-",
+		"\u2013", "-",
+		"\u2014", "-",
+		"\u2015", "-",
+		)
+
 )
 
 // traverseTableCtx holds text-related context.
