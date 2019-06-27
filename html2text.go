@@ -2,6 +2,7 @@ package html2text
 
 import (
 	"bytes"
+	"golang.org/x/text/unicode/norm"
 	"io"
 	"regexp"
 	"strings"
@@ -43,6 +44,9 @@ func FromHTMLNode(doc *html.Node, o ...Options) (string, error) {
 
 	// disallow some typographic quotes
 	text = typographicReplacer.Replace(text)
+
+	// decompose ligatures etc
+	text = norm.NFKD.String(text)
 
 	return text, nil
 }
