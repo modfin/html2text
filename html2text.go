@@ -47,6 +47,7 @@ func FromHTMLNode(doc *html.Node, o ...Options) (string, error) {
 
 	// decompose ligatures etc
 	text = norm.NFKD.String(text)
+	text = norm.NFKC.String(text)
 
 	return text, nil
 }
